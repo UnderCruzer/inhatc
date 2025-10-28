@@ -274,7 +274,8 @@ function EnrollmentTable({ 전형명, data, isSpecial = false }) {
                 const MAX_GAUGE_PERCENT = 2000;
                 const progressValue = (applicationRatePercent / MAX_GAUGE_PERCENT) * 100;
                 
-                const specialTotal = (row.전문대졸 || 0) + (row.북한이탈주민 || 0);
+                // 특별전형의 총 지원자수는 이미 '지원자수' 필드에 합산되어 있음
+                const specialTotal = isSpecial ? row.지원자수 : 0;
                 
                 return (
                   <TableRow key={idx}>
@@ -473,6 +474,7 @@ export default function App() {
       });
   }, []);
 
+  // '전년도 비교' 탭을 위한 데이터 (올해 + 작년)
   const comparisonData = useMemo(() => {
     if (!data || !lastYearData) return [];
     return data
@@ -481,14 +483,19 @@ export default function App() {
         const lastYearItem = lastYearData.find(item => {
           if (item.학과 !== currentItem.학과) return false;
 
+          // 전형명 정규화 (e.g., "일반고전형" -> "일반고", "일반전형" -> "일반")
           const normalize = (name = '') => name.replace(/전형|경쟁률 현황|\s/g, '').trim();
           
           let currentTypeName = normalize(currentItem.전형명);
           let lastYearTypeName = normalize(item.전형명);
           
+          // "일반" (올해) <-> "일반고" (작년) 매칭
           if ((currentTypeName === '일반' && lastYearTypeName === '일반고') || 
               (currentTypeName === '일반고' && lastYearTypeName === '일반')) return true;
+          // "특성화고" <-> "특성화고" 매칭
           if (currentTypeName === '특성화고' && lastYearTypeName === '특성화고') return true;
+          // "특기자(어학)" <-> "특기자(어학)" 매칭
+          if (currentTypeName === '특기자(어학)' && lastYearTypeName === '특기자(어학)') return true;
           
           return currentTypeName === lastYearTypeName;
         });
@@ -512,6 +519,7 @@ export default function App() {
       });
   }, [data, lastYearData]);
   
+  // 현재 탭과 필터에 따라 최종적으로 표시될 데이터
   const processedData = useMemo(() => {
     const sourceData = activeTab === 'current' ? data : comparisonData;
     
@@ -526,20 +534,17 @@ export default function App() {
     }
   
     if (sortOrder !== 'none') {
-        const getApplicants = (item) => (item.지원자수 || 0) + (item.전문대졸 || 0);
+        // '지원자수'는 특별전형의 합계를 이미 포함하고 있음
+        const getApplicants = (item) => (item.지원자수 || 0);
         filtered.sort((a, b) => sortOrder === 'desc' ? getApplicants(b) - getApplicants(a) : getApplicants(a) - getApplicants(b));
     }
   
     return filtered;
   }, [data, comparisonData, searchTerm, categoryFilter, sortOrder, activeTab]);
 
-  const generalData = activeTab === 'current' 
-    ? processedData.filter(item => item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number')
-    : processedData;
-    
-  const specialData = activeTab === 'current' 
-    ? processedData.filter(item => item.전형명 === "특별전형")
-    : [];
+  // '실시간' 탭의 테이블용 데이터 (필터링됨)
+  const generalData = processedData.filter(item => activeTab === 'current' && item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
+  const specialData = processedData.filter(item => activeTab === 'current' && item.전형명 === "특별전형");
   
   const groupedGeneral = generalData.reduce((acc, cur) => {
     const category = cur.전형명 || '일반 전형';
@@ -548,37 +553,41 @@ export default function App() {
     return acc
   }, {})
 
-  const totalApplicants = data.reduce((sum, item) => sum + (item.지원자수 || 0) + (item.전문대졸 || 0) + (item.북한이탈주민 || 0), 0)
-  const totalCapacity = data.reduce((sum, item) => sum + (item.모집인원 || 0), 0)
+  // --- 통계 카드용 데이터 계산 (필터링 *무시* - 항상 전체 기준) ---
+  const totalApplicants = useMemo(() => data.reduce((sum, item) => sum + (item.지원자수 || 0), 0), [data]);
+  const originalGeneralData = useMemo(() => data.filter(item => item.전형명 !== "특별전형"), [data]);
+  const totalGeneralApplicants = useMemo(() => originalGeneralData.reduce((sum, item) => sum + (item.지원자수 || 0), 0), [originalGeneralData]);
+  const totalGeneralCapacity = useMemo(() => originalGeneralData.reduce((sum, item) => sum + (item.모집인원 || 0), 0), [originalGeneralData]);
   
-  const originalGeneralData = data.filter(item => item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
-  const competitionRates = originalGeneralData.map(item => item.경쟁률);
-  const avgCompetitionRate = competitionRates.length > 0 ? competitionRates.reduce((sum, rate) => sum + rate, 0) / competitionRates.length : 0;
+  const avgCompetitionRate = useMemo(() => (totalGeneralCapacity > 0 ? totalGeneralApplicants / totalGeneralCapacity : 0), [totalGeneralApplicants, totalGeneralCapacity]);
   
-  const highestCompetitionRateItem = originalGeneralData.length > 0 
-    ? originalGeneralData.reduce((max, item) => (item.경쟁률 > max.경쟁률 ? item : max), {경쟁률: 0, 학과: 'N/A'}) 
-    : { 경쟁률: 0, 학과: 'N/A' };
+  const highestCompetitionRateItem = useMemo(() => {
+    const general = data.filter(item => item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
+    return general.length > 0 
+      ? general.reduce((max, item) => (item.경쟁률 > max.경쟁률 ? item : max), {경쟁률: 0, 학과: 'N/A', 전형명: ''}) 
+      : { 경쟁률: 0, 학과: 'N/A', 전형명: '' };
+  }, [data]);
 
+  // --- 차트용 데이터 계산 (필터링 *적용*) ---
   const topDepartments = useMemo(() => {
-    const source = activeTab === 'current' ? processedData : comparisonData;
+    const source = activeTab === 'current' ? processedData : processedData.map(item => ({...item, 경쟁률: item.경쟁률 || 0}));
+    
     let filteredSource = source.filter(item => item.전형명 !== '특별전형' && typeof item.경쟁률 === 'number');
-
-     if (searchTerm) {
-      filteredSource = filteredSource.filter(item => item.학과 && item.학과.toLowerCase().includes(searchTerm.toLowerCase()));
-    }
     
     return [...filteredSource]
         .sort((a,b) => b.경쟁률 - a.경쟁률)
         .slice(0,10)
         .map(item => ({...item, displayName: `${item.학과} (${item.전형명})`}));
-  }, [processedData, comparisonData, activeTab, searchTerm]);
+  }, [processedData, activeTab]);
 
 
   const categoryDistribution = useMemo(() => {
-    const source = activeTab === 'current' ? processedData : comparisonData;
+    const source = processedData; // 항상 현재 필터링된 데이터를 기준
+    
     const applicantsByCategory = source.reduce((acc, cur) => {
       const category = cur.계열 || '기타';
-      const applicants = (cur.지원자수 || 0) + (cur.전문대졸 || 0) + (cur.북한이탈주민 || 0);
+      // '지원자수'는 이미 특별전형 합계가 포함되어 있음
+      const applicants = (cur.지원자수 || 0); 
       if (!acc[category]) {
         acc[category] = 0;
       }
@@ -589,8 +598,8 @@ export default function App() {
     return Object.keys(applicantsByCategory).map(key => ({
       name: key,
       value: applicantsByCategory[key]
-    }));
-  }, [processedData, comparisonData, activeTab]);
+    })).filter(item => item.value > 0);
+  }, [processedData]);
 
   const categories = ['전체', '공학', '예체능', '인문사회'];
 
@@ -692,7 +701,7 @@ export default function App() {
                       <Users className="h-4 w-4 text-blue-600" />
                     </CardHeader>
                     <CardContent>
-                      <div className="text-3xl font-extrabold text-blue-800">
+                      <div className="text-3xl font-extrabold text-blue-800 text-center">
                         {totalApplicants.toLocaleString()}명
                       </div>
                     </CardContent>
@@ -700,23 +709,23 @@ export default function App() {
 
                   <Card className="border-0 shadow-lg transition-all hover:shadow-xl bg-gradient-to-br from-green-50 to-green-100">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
-                      <CardTitle className="text-sm font-medium text-green-700">총 모집인원 (일반전형)</CardTitle>
+                      <CardTitle className="text-sm font-medium text-green-700">총 모집인원 (전체)</CardTitle>
                       <Target className="h-4 w-4 text-green-600" />
                     </CardHeader>
                     <CardContent>
-                      <div className="text-3xl font-extrabold text-green-800">
-                        {totalCapacity.toLocaleString()}명
+                      <div className="text-3xl font-extrabold text-green-800 text-center">
+                        {totalGeneralCapacity.toLocaleString()}명
                       </div>
                     </CardContent>
                   </Card>
 
                   <Card className="border-0 shadow-lg transition-all hover:shadow-xl bg-gradient-to-br from-orange-50 to-orange-100">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
-                      <CardTitle className="text-sm font-medium text-orange-700">평균 경쟁률 (일반전형)</CardTitle>
+                      <CardTitle className="text-sm font-medium text-orange-700">평균 경쟁률 (전체)</CardTitle>
                       <BarChart3 className="h-4 w-4 text-orange-600" />
                     </CardHeader>
                     <CardContent>
-                      <div className="text-3xl font-extrabold text-orange-800">
+                      <div className="text-3xl font-extrabold text-orange-800 text-center">
                         {avgCompetitionRate.toFixed(2)}:1
                       </div>
                     </CardContent>
@@ -727,11 +736,11 @@ export default function App() {
                       <CardTitle className="text-sm font-medium text-red-700">최고 경쟁률 (학과)</CardTitle>
                       <TrendingUp className="h-4 w-4 text-red-600" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-xl font-bold text-red-800 truncate" title={highestCompetitionRateItem.학과}>
+                    <CardContent className="text-center">
+                      <div className="text-3xl font-bold text-red-800" title={highestCompetitionRateItem.학과}>
                         {highestCompetitionRateItem.경쟁률.toFixed(1)}:1
                       </div>
-                      <p className="text-xs text-red-600 mt-1 font-semibold">{highestCompetitionRateItem.학과}</p>
+                      <p className="text-sm text-red-600 mt-1 font-semibold truncate">{highestCompetitionRateItem.학과} ({highestCompetitionRateItem.전형명})</p>
                     </CardContent>
                   </Card>
                 </div>
