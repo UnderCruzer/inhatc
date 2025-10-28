@@ -1,7 +1,9 @@
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import re
+import json
 
 app = FastAPI()
 
@@ -20,23 +22,23 @@ LAST_YEAR_URL = "https://apply.jinhakapply.com/SmartRatio/PastRatioUniv?univid=4
 
 def to_int(val: str) -> int:
     val = val.strip()
-    if val == "" or "제한없음" in val or "없음" in val or val == "-":
+    if val == "" or "제한없음" in val or "없음" in val or "-" in val:
         return 0
     val = val.replace(",", "")
     try:
         return int(val)
-    except (ValueError, TypeError):
+    except:
         return 0
 
 
 def to_float(val: str) -> float:
     val = val.strip()
-    if val == "" or "없음" in val or val == "-":
+    if val == "" or "없음" in val or "-" in val:
         return 0.0
     try:
-        # "2.6:1" 같은 형식에서 "2.6"만 추출
+        # "8.11 : 1" 같은 형태에서 "8.11"만 추출
         return float(val.split(":")[0].strip())
-    except (ValueError, TypeError, IndexError):
+    except:
         return 0.0
 
 
@@ -53,6 +55,9 @@ def crawl():
     for table in detail_tables:
         h2 = table.find_previous("h2")
         전형명 = h2.get_text(strip=True) if h2 else "전형"
+        # '경쟁률 현황' 등 불필요한 텍스트 제거
+        전형명 = 전형명.replace(" 경쟁률 현황", "").strip()
+
 
         rows = table.find_all("tr")[1:]  # 헤더 제외
         current_계열 = None  # rowspan 처리용
@@ -72,11 +77,13 @@ def crawl():
 
             if is_new_category:
                 if len(tds) >= 5:
-                    학과, 모집, 지원, 경쟁률 = cols[1], cols[2], cols[3], cols[4]
+                    학과 = cols[1]
+                    모집, 지원, 경쟁률 = cols[2:5]
                 else: continue
             else:
                 if len(tds) >= 4:
-                    학과, 모집, 지원, 경쟁률 = cols[0], cols[1], cols[2], cols[3]
+                    학과 = cols[0]
+                    모집, 지원, 경쟁률 = cols[1:4]
                 else: continue
 
             if 학과 in ["합계", "계", "총계"]:
@@ -103,6 +110,7 @@ def crawl():
         if special_table_header:
             special_table = special_table_header.find_parent('table')
             
+    
     if special_table:
         special_rows = special_table.find_all("tr")[1:] # 헤더 제외
         current_계열 = None
@@ -122,11 +130,13 @@ def crawl():
 
             if is_new_category:
                 if len(tds) >= 4:
-                    학과, 전문대졸, 북한이탈주민 = cols[1], cols[2], cols[3]
+                    학과 = cols[1]
+                    전문대졸, 북한이탈주민 = cols[2:4] # 4번째 TD(합계)는 무시
                 else: continue
             else:
                 if len(tds) >= 3:
-                    학과, 전문대졸, 북한이탈주민 = cols[0], cols[1], cols[2]
+                    학과 = cols[0]
+                    전문대졸, 북한이탈주민 = cols[1:3] # 3번째 TD(합계)는 무시
                 else: continue
 
             if 학과 in ["합계", "계", "총계"]:
@@ -139,123 +149,78 @@ def crawl():
                 "전형명": "특별전형", 
                 "계열": current_계열,
                 "학과": 학과,
-                "모집인원": 0, # 특별전형은 모집인원이 '제한없음' 등이라 0으로 처리
-                "지원자수": 전문대졸_int + 북한이탈주민_int, # 지원자수 필드에 합계를 저장
+                "모집인원": 0, # 특별전형은 모집인원이 '제한없음'
+                "지원자수": 전문대졸_int + 북한이탈주민_int, # '지원자수' 필드에 합계
                 "경쟁률": 0.0,
                 "전문대졸": 전문대졸_int,
                 "북한이탈주민": 북한이탈주민_int,
             })
 
-    return {"data": result}
 
+    return {"data": result}
 
 @app.get("/crawl/lastyear")
 def crawl_last_year():
     try:
         res = requests.get(LAST_YEAR_URL)
-        res.encoding = "euc-kr"
+        res.encoding = "utf-8"
         soup = BeautifulSoup(res.text, "html.parser")
         result = []
 
-        header = soup.find("th", string=lambda t: t and "전형명 · 모집단위" in t)
-        if not header:
-            print("Last year crawl: Header not found")
+        # Find the script tag containing the data
+        # "var sortedData =" 이 부분을 찾아 JSON 데이터를 추출
+        script_tag = soup.find("script", string=re.compile(r"var\s+sortedData\s*=\s*\["))
+        if not script_tag:
+            print("Could not find sortedData script tag.")
             return {"data": []}
 
-        table = header.find_parent("table")
-        if not table:
-            print("Last year crawl: Table not found")
+        script_content = script_tag.string
+        
+        # Extract the JSON array string
+        json_match = re.search(r"var\s+sortedData\s*=\s*(\[.*\]);", script_content, re.DOTALL | re.MULTILINE)
+        if not json_match:
+            print("Could not extract sortedData JSON.")
             return {"data": []}
 
-        rows = table.select("tbody > tr")
+        json_data_str = json_match.group(1)
         
-        current_sigi = None
-        current_hakgwa = None
+        # The JSON is slightly malformed (uses single quotes), so we need to clean it
+        # 1. Replace single quotes in keys with double quotes
+        json_data_str = re.sub(r"([{,]\s*)(')(\w+)(')(\s*:)", r'\1"\3"\5', json_data_str)
+        # 2. Replace single quotes in values with double quotes
+        json_data_str = re.sub(r"(\:\s*)(')(.*?)(')(\s*[,}])", r'\1"\3"\5', json_data_str)
         
-        sigi_rowspan = 0
-        hakgwa_rowspan = 0
+        try:
+            # Parse the cleaned JSON string
+            data = json.loads(json_data_str)
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON: {e}")
+            # Fallback for potentially unquoted keys if regex failed
+            try:
+                json_data_str = re.sub(r"([{,]\s*)(\w+)(\s*:)", r'\1"\2"\3', json_match.group(1))
+                json_data_str = re.sub(r"(\:\s*)(')(.*?)(')(\s*[,}])", r'\1"\3"\5', json_data_str)
+                data = json.loads(json_data_str)
+            except Exception as e2:
+                print(f"Final JSON parse attempt failed: {e2}")
+                return {"data": []}
 
-        for row in rows:
-            cells = row.find_all(["th", "td"])
+        # We have the data, now filter it
+        target_types = ["일반고", "특성화고", "특기자(어학)"]
+        
+        for item in data:
+            # 'Gubun'이 '수시1'인지 확인
+            if item.get("Gubun") == "수시1" and item.get("SelTypeName") in target_types:
+                result.append({
+                    "전형명": item.get("SelTypeName"),
+                    "계열": item.get("GyeYeol"),
+                    "학과": item.get("MajorName"),
+                    "모집인원": to_int(item.get("Mojip", "0")),
+                    "지원자수": to_int(item.get("Jiwon", "0")),
+                    "경쟁률": to_float(item.get("Ratio", "0"))
+                })
             
-            cell_cursor = 0
-            
-            # 1. '모집시기' (수시1) 추적
-            if sigi_rowspan == 0:
-                sigi_cell = cells[cell_cursor]
-                cell_cursor += 1
-                if sigi_cell.name == "th" and sigi_cell.has_attr("rowspan"):
-                    current_sigi = sigi_cell.get_text(strip=True)
-                    sigi_rowspan = int(sigi_cell.get("rowspan", 1))
-                else:
-                    current_sigi = sigi_cell.get_text(strip=True)
-                    sigi_rowspan = 1
-            sigi_rowspan -= 1
-            
-            if "수시1" not in (current_sigi or ""):
-                continue
-
-            # 2. '학과' (볼드체) 및 '전형명' 추적
-            if hakgwa_rowspan == 0:
-                hakgwa_cell = cells[cell_cursor]
-                cell_cursor += 1
-                if hakgwa_cell.has_attr("rowspan"):
-                    hakgwa_rowspan = int(hakgwa_cell.get("rowspan", 1))
-                else:
-                    hakgwa_rowspan = 1
-                
-                strong_tag = hakgwa_cell.find("strong")
-                if strong_tag:
-                    current_hakgwa = strong_tag.get_text(strip=True)
-                    strong_tag.decompose()
-                
-                전형명 = hakgwa_cell.get_text(strip=True)
-            else:
-                hakgwa_cell = cells[cell_cursor]
-                cell_cursor += 1
-                전형명 = hakgwa_cell.get_text(strip=True)
-            
-            hakgwa_rowspan -= 1
-
-            if not current_hakgwa:
-                continue
-                
-            # 3. 원하는 전형명인지 확인 및 데이터 추출
-            if 전형명 in ["일반고", "특성화고", "특기자(어학)"]:
-                try:
-                    cell_mojip_jiwon = cells[cell_cursor]
-                    cell_gyengjaeng = cells[cell_cursor + 2] # 경쟁률은 2칸 뒤
-                    
-                    numbers = [s.strip() for s in cell_mojip_jiwon.stripped_strings]
-                    
-                    모집 = "0"
-                    지원 = "0"
-                    
-                    if len(numbers) >= 1:
-                        모집 = numbers[0]
-                    if len(numbers) >= 3: # 51<br>-<br>228 구조
-                        지원 = numbers[2]
-                    elif len(numbers) == 2: # 51<br>228 구조 (혹은 -가 빠진)
-                        지원 = numbers[1]
-                    elif len(numbers) == 1: # 지원자만 있는 경우
-                         지원 = numbers[0]
-
-                    경쟁 = cell_gyengjaeng.get_text(strip=True)
-
-                    result.append({
-                        "전형명": 전형명,
-                        "계열": None,  # 이 페이지에서 계열 정보 수집 불가
-                        "학과": current_hakgwa,
-                        "모집인원": to_int(모집),
-                        "지원자수": to_int(지원),
-                        "경쟁률": to_float(경쟁)
-                    })
-                except IndexError:
-                    print(f"Row parsing error for {current_hakgwa} - {전형명}")
-                    continue
-
         return {"data": result}
     except Exception as e:
-        print(f"Error in /crawl/lastyear: {e}")
+        print(f"Error in crawl_last_year: {e}")
         return {"data": []}
 
