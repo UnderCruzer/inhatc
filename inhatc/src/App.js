@@ -838,7 +838,8 @@ export default function App() {
         {/* Footer */}
         <div className="text-center py-8">
           <p className="text-sm text-slate-500">
-            * 경쟁률 및 지원자 수는 실시간으로 업데이트되며, 최종 경쟁률과 다를 수 있습니다.
+            경쟁률 및 지원자 수는 실시간으로 업데이트되며, 최종 경쟁률과 다를 수 있습니다.</p>
+           <p className="text-sm text-slate-500"> 웹 서비스 오류 및 문의 : mj030725@gmail.com / Tel : 010-7939-7764 이명진
           </p>
         </div>
       </div>

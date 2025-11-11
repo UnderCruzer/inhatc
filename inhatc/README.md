@@ -1,70 +1,31 @@
-# Getting Started with Create React App
+인하공업전문대학 수시 경쟁률 UI 웹서비스 구현
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Available Scripts
+1. 기간 : 26년도 수시 1-2차 기간 25/09~25/12
 
-In the project directory, you can run:
+2. 주요 개발 툴 : VScode, React. Python
 
-### `npm start`
+3. 크롤링 사이트
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- 26년도 수시 1차 : https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260461.html
+- 25년도 수시 1차 : https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260361.html 
+- 26년도 수시 2차 : https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260471.html
+- 25년도 수시 2차 : https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260371.html
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+4. 주요 기능
 
-### `npm test`
+1) 현존하는 경쟁률 사이트는 진학사에서 제공하다보니 시각화에 조금 불편한 점이 있어서 사용자들이 한눈에 알아보기 쉽게 구현
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+2) "수시 1차 - 실시간 경쟁률, 전년도 비교 / 수시 2차 - 실시간 경쟁률, 전년도 비교" 로 한번에 전년도와 금년 비교 가능
 
-### `npm run build`
+3) 검색 기능 : 검색을 통해 사용자가 검색을 해서 원하는 학과만 볼 수 있게끔 구현
+            
+4) 총 모집인원, 총 지원인원, 경쟁률 평균, 최고 경쟁률 학과를 헤더에 추가
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+5) 경쟁률 TOP 10 학과 및 파이차트를 통해 계열별 지원자 분포 데이터 시각화, 검색 시 해당 학과 데이터로 시각화
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+6) 수시 1차 기준 : 일반고, 특성화고, 특기자(어학), 전문대졸/북한이탈주민 경쟁률 전형별 구분
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+7) 수시 2차 기준 : 일반고, 특성화고, 특기자(어학), 전문대졸/북한이탈주민, 수급자, 농어촌 경쟁률 전형별 구분
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+8) 전년도 비교 탭 : 금년과 전년도의 지원인원, 경쟁률의 차를 구하여 증감률 시각화
