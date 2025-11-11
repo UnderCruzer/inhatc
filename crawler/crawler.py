@@ -14,9 +14,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CURRENT_YEAR_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260461.html"
-# 전년도 URL 업데이트
-LAST_YEAR_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260361.html"
+CURRENT_YEAR_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260461.html" # 수시 1차 (금년)
+LAST_YEAR_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260361.html" # 수시 1차 (전년)
+SECOND_ROUND_2026_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260471.html" # 수시 2차 (금년)
+SECOND_ROUND_LAST_YEAR_URL = "https://addon.jinhakapply.com/RatioV1/RatioH/Ratio41260371.html"# 수시 2차 (전년)
 
 
 def to_int(val: str) -> int:
@@ -174,13 +175,137 @@ def crawl():
     return {"data": result}
 
 
-# 전년도 데이터 크롤링 함수 (새 URL 기반)
+# --- 2026년도 수시 2차 크롤링 ---
+@app.get("/crawl/2nd")
+def crawl_2nd_round():
+    try:
+        res = requests.get(SECOND_ROUND_2026_URL)
+        res.raise_for_status()
+        res.encoding = "utf-8"
+        soup = BeautifulSoup(res.text, "html.parser")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching 2nd round data: {e}")
+        return {"data": []}
+    except Exception as e:
+        print(f"Error parsing 2nd round data: {e}")
+        return {"data": []}
+
+    result = []
+
+    # 1. 일반 전형별 학과 표 (tableRatio3) 크롤링
+    detail_tables = soup.find_all("table", class_="tableRatio3")
+    for table in detail_tables:
+        h2 = table.find_previous("h2")
+        전형명 = h2.get_text(strip=True) if h2 else "전형"
+        if "지원인원 현황" in 전형명:
+            continue
+
+        rows = table.find_all("tr")[1:]  # 헤더 제외
+        current_계열 = None  # rowspan 처리용 (버그 수정 로직)
+
+        for tr in rows:
+            tds = tr.find_all("td")
+            if tds and tds[0].has_attr('rowspan'):
+                current_계열 = tds[0].get_text(strip=True)
+                data_tds = tds[1:]
+            elif tds:
+                data_tds = tds
+            else:
+                continue 
+
+            cols = [td.get_text(strip=True) for td in data_tds]
+
+            if not cols:
+                continue
+
+            if len(cols) >= 4:
+                학과, 모집, 지원, 경쟁률 = cols[0], cols[1], cols[2], cols[3]
+            else:
+                print(f"Skipping row (2nd round) with unexpected column count in {전형명}: {cols}")
+                continue
+
+            if 학과 in ["합계", "계", "총계", "소계"]:
+                continue
+
+            result.append({
+                "전형명": 전형명,
+                "계열": current_계열,
+                "학과": 학과,
+                "모집인원": to_int(모집),
+                "지원자수": to_int(지원),
+                "경쟁률": to_float(경쟁률)
+            })
+
+    # 2. 특별 전형 (지원인원 현황) 테이블 크롤링 (수시 1차와 동일한 로직)
+    special_header = soup.find(lambda tag: tag.name in ['h2', 'strong'] and '지원인원 현황(전문대졸, 북한이탈주민)' in tag.get_text(strip=True))
+
+    special_table = None
+    if special_header:
+        special_table = special_header.find_next_sibling('table')
+        if not special_table or special_table.name != 'table':
+            special_table = special_header.find_next('table')
+
+    if not special_table:
+        th_header = soup.find('th', string=lambda t: t and '전문대졸' in t and '북한이탈주민' in t)
+        if th_header:
+            special_table = th_header.find_parent('table')
+
+    if special_table:
+        special_rows = special_table.find_all("tr")[1:] # 헤더 제외
+        current_계열 = None # rowspan 처리용
+
+        for tr in special_rows:
+            tds = tr.find_all("td")
+
+            if tds and tds[0].has_attr('rowspan'):
+                current_계열 = tds[0].get_text(strip=True)
+                data_tds = tds[1:]
+            elif tds:
+                data_tds = tds
+            else:
+                continue
+
+            cols = [td.get_text(strip=True) for td in data_tds]
+
+            if not cols:
+                continue
+
+            if len(cols) >= 3:
+                학과, 전문대졸, 북한이탈주민 = cols[0], cols[1], cols[2]
+            else:
+                print(f"Skipping row (2nd round) with unexpected column count in Special Enrollment: {cols}")
+                continue
+
+            if 학과 in ["합계", "계", "총계", "소계"]:
+                continue
+
+            전문대졸_int = to_int(전문대졸)
+            북한이탈주민_int = to_int(북한이탈주민)
+
+            result.append({
+                "전형명": "특별전형",
+                "계열": current_계열,
+                "학과": 학과,
+                "모집인원": 0,
+                "지원자수": 전문대졸_int + 북한이탈주민_int,
+                "경쟁률": 0.0,
+                "전문대졸": 전문대졸_int,
+                "북한이탈주민": 북한이탈주민_int,
+            })
+    else:
+        print("Special enrollment table (2nd round) not found.")
+
+
+    return {"data": result}
+
+
+# --- 수시 1차 전년도 데이터 크롤링 ---
 @app.get("/crawl/lastyear")
 def crawl_last_year():
     try:
         res = requests.get(LAST_YEAR_URL)
-        res.raise_for_status() # HTTP 오류 체크
-        res.encoding = "utf-8" # 인코딩 utf-8로 변경 시도
+        res.raise_for_status() 
+        res.encoding = "utf-8"
         soup = BeautifulSoup(res.text, "html.parser")
     except requests.exceptions.RequestException as e:
         print(f"Error fetching last year data: {e}")
@@ -189,32 +314,24 @@ def crawl_last_year():
         print(f"Error parsing last year data: {e}")
         return {"data": []}
 
-
     result = []
-
-    # 새 URL 구조에 맞춰 테이블 찾기 (기존 tableRatio3 과 동일하다고 가정)
     detail_tables = soup.find_all("table", class_="tableRatio3")
     if not detail_tables:
         print("No tableRatio3 found in last year data page.")
-        # 다른 테이블 클래스나 구조를 찾아야 할 수 있음
-        # 예: dept_tables = soup.select("table.some-other-class")
 
     for table in detail_tables:
         h2 = table.find_previous("h2")
-        전형명 = h2.get_text(strip=True) if h2 else "전형_작년" # 작년 데이터임을 구분
-        if "지원인원 현황" in 전형명: # 특별전형 테이블 스킵
+        전형명 = h2.get_text(strip=True) if h2 else "전형_작년" 
+        if "지원인원 현황" in 전형명:
             continue
 
-        rows = table.find_all("tr")[1:]  # 헤더 제외
+        rows = table.find_all("tr")[1:]
         current_계열 = None
 
         for tr in rows:
             tds = tr.find_all("td")
-
-            is_new_category = False
             if tds and tds[0].has_attr('rowspan'):
                 current_계열 = tds[0].get_text(strip=True)
-                is_new_category = True
                 data_tds = tds[1:]
             elif tds:
                 data_tds = tds
@@ -236,7 +353,72 @@ def crawl_last_year():
                 continue
 
             result.append({
-                "전형명": 전형명, # 여기서 가져온 전형명 사용
+                "전형명": 전형명, 
+                "계열": current_계열,
+                "학과": 학과,
+                "모집인원": to_int(모집),
+                "지원자수": to_int(지원),
+                "경쟁률": to_float(경쟁률)
+            })
+
+    return {"data": result}
+
+
+# --- 수시 2차 전년도 데이터 크롤링 ---
+@app.get("/crawl/2nd/lastyear")
+def crawl_2nd_round_last_year():
+    try:
+        res = requests.get(SECOND_ROUND_LAST_YEAR_URL)
+        res.raise_for_status() 
+        res.encoding = "utf-8"
+        soup = BeautifulSoup(res.text, "html.parser")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching 2nd round last year data: {e}")
+        return {"data": []}
+    except Exception as e:
+        print(f"Error parsing 2nd round last year data: {e}")
+        return {"data": []}
+
+    result = []
+    detail_tables = soup.find_all("table", class_="tableRatio3")
+    if not detail_tables:
+        print("No tableRatio3 found in 2nd round last year data page.")
+
+    for table in detail_tables:
+        h2 = table.find_previous("h2")
+        전형명 = h2.get_text(strip=True) if h2 else "전형_작년_2차" 
+        if "지원인원 현황" in 전형명:
+            continue
+
+        rows = table.find_all("tr")[1:]
+        current_계열 = None
+
+        for tr in rows:
+            tds = tr.find_all("td")
+            if tds and tds[0].has_attr('rowspan'):
+                current_계열 = tds[0].get_text(strip=True)
+                data_tds = tds[1:]
+            elif tds:
+                data_tds = tds
+            else:
+                continue
+
+            cols = [td.get_text(strip=True) for td in data_tds]
+
+            if not cols:
+                continue
+
+            if len(cols) >= 4:
+                학과, 모집, 지원, 경쟁률 = cols[0], cols[1], cols[2], cols[3]
+            else:
+                print(f"Skipping row (2nd round, last year) with unexpected column count in {전형명}: {cols}")
+                continue
+
+            if 학과 in ["합계", "계", "총계", "소계"]:
+                continue
+
+            result.append({
+                "전형명": 전형명, 
                 "계열": current_계열,
                 "학과": 학과,
                 "모집인원": to_int(모집),
