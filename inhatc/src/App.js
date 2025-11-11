@@ -406,21 +406,25 @@ function ComparisonTable({ data }) {
                                         <TableCell className="text-right font-mono">{row.모집인원?.toLocaleString()}명</TableCell>
                                         <TableCell className="text-right font-mono">{row.지원자수?.toLocaleString()}명</TableCell>
                                         <TableCell className="text-right font-mono">{row.경쟁률?.toFixed(2)}:1</TableCell>
-                                        <TableCell className="text-center">-</TableCell>
+                                        
+                                        {/* 1. 증감률 셀 병합 (rowSpan=2) 및 수직 중앙 정렬(align-middle) */}
+                                        <TableCell rowSpan={2} className="text-center align-middle">
+                                            {row.changes ? (
+                                                // 2. 글씨 크기(text-xs) 제거 및 세로 정렬(flex-col)
+                                                <div className="flex flex-col justify-center gap-y-1 items-center">
+                                                   <span><ChangeIndicator value={row.changes.지원자수} /> (지원)</span>
+                                                   <span><ChangeIndicator value={row.changes.경쟁률} /> (경쟁)</span>
+                                                </div>
+                                            ) : '-'}
+                                        </TableCell>
                                     </TableRow>
                                     <TableRow>
                                         <TableCell className="font-semibold text-slate-500 text-center">전년</TableCell>
                                         <TableCell className="text-right font-mono text-slate-500">{row.lastYear?.모집인원?.toLocaleString() ?? '-'}명</TableCell>
                                         <TableCell className="text-right font-mono text-slate-500">{row.lastYear?.지원자수?.toLocaleString() ?? '-'}명</TableCell>
                                         <TableCell className="text-right font-mono text-slate-500">{row.lastYear?.경쟁률?.toFixed(2) ?? '- '}:1</TableCell>
-                                        <TableCell className="text-center">
-                                            {row.changes ? (
-                                                <div className="flex flex-col text-xs items-center">
-                                                   <span><ChangeIndicator value={row.changes.지원자수} /> (지원)</span>
-                                                   <span><ChangeIndicator value={row.changes.경쟁률} /> (경쟁)</span>
-                                                </div>
-                                            ) : '-'}
-                                        </TableCell>
+                                        
+                                        {/* 3. 두 번째 행의 증감률 셀은 제거됨 */}
                                     </TableRow>
                                 </React.Fragment>
                             ))}
@@ -432,7 +436,6 @@ function ComparisonTable({ data }) {
     );
 }
 
-
 // --- Main App ---
 
 function getCompetitionBadgeColor(rate) {
@@ -442,61 +445,21 @@ function getCompetitionBadgeColor(rate) {
   return "default";
 }
 
-export default function App() {
-  const [data, setData] = useState([])
-  const [lastYearData, setLastYearData] = useState([]);
-  const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('전체');
-  const [sortOrder, setSortOrder] = useState('none'); // 'none', 'desc', 'asc'
-  const [activeTab, setActiveTab] = useState('current'); // 'current', 'lastYear'
-
-
-  useEffect(() => {
-    const currentYearPromise = fetch("http://localhost:8000/crawl")
-      .then(res => res.ok ? res.json() : Promise.reject(`Current year data fetch failed: ${res.status}`))
-      .then(res => res.data || []);
-
-    const lastYearPromise = fetch("http://localhost:8000/crawl/lastyear")
-      .then(res => res.ok ? res.json() : Promise.reject(`Last year data fetch failed: ${res.status}`))
-      .then(res => res.data || []);
-
-    Promise.all([currentYearPromise, lastYearPromise])
-      .then(([currentData, lyData]) => {
-        setData(currentData);
-        setLastYearData(lyData);
-      })
-      .catch((err) => {
-        console.error("데이터 불러오기 실패:", err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, []);
-
-  // '전년도 비교' 탭을 위한 데이터 (올해 + 작년)
-  const comparisonData = useMemo(() => {
-    if (!data || !lastYearData) return [];
-    return data
+// 비교 데이터 생성 로직을 위한 헬퍼 함수
+const createComparisonData = (currentData, lastYearData) => {
+    if (!currentData || !lastYearData) return [];
+    return currentData
       .filter(item => item.전형명 !== '특별전형')
       .map(currentItem => {
         const lastYearItem = lastYearData.find(item => {
           if (item.학과 !== currentItem.학과) return false;
-
-          // 전형명 정규화 (e.g., "일반고전형" -> "일반고", "일반전형" -> "일반")
           const normalize = (name = '') => name.replace(/전형|경쟁률 현황|\s/g, '').trim();
-          
           let currentTypeName = normalize(currentItem.전형명);
           let lastYearTypeName = normalize(item.전형명);
-          
-          // "일반" (올해) <-> "일반고" (작년) 매칭
           if ((currentTypeName === '일반' && lastYearTypeName === '일반고') || 
               (currentTypeName === '일반고' && lastYearTypeName === '일반')) return true;
-          // "특성화고" <-> "특성화고" 매칭
           if (currentTypeName === '특성화고' && lastYearTypeName === '특성화고') return true;
-          // "특기자(어학)" <-> "특기자(어학)" 매칭
           if (currentTypeName === '특기자(어학)' && lastYearTypeName === '특기자(어학)') return true;
-          
           return currentTypeName === lastYearTypeName;
         });
 
@@ -517,11 +480,77 @@ export default function App() {
 
         return { ...currentItem, lastYear: lastYearItem, changes };
       });
-  }, [data, lastYearData]);
+};
+
+
+export default function App() {
+  const [data, setData] = useState([]) // 수시 1차
+  const [data2nd, setData2nd] = useState([]) // 수시 2차
+  const [lastYearData, setLastYearData] = useState([]); // 수시 1차 전년도
+  const [lastYearData2nd, setLastYearData2nd] = useState([]); // 수시 2차 전년도
+  
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('전체');
+  const [sortOrder, setSortOrder] = useState('none'); // 'none', 'desc', 'asc'
+  
+  const [activeTab, setActiveTab] = useState('1st'); // '1st', '2nd'
+  const [subTab, setSubTab] = useState('current'); // 'current', 'compare'
+
+
+  useEffect(() => {
+    const currentYearPromise = fetch("http://localhost:8000/crawl") // 수시 1차
+      .then(res => res.ok ? res.json() : Promise.reject(`Current year data fetch failed: ${res.status}`))
+      .then(res => res.data || []);
+
+    const lastYearPromise = fetch("http://localhost:8000/crawl/lastyear") // 수시 1차 전년도
+      .then(res => res.ok ? res.json() : Promise.reject(`Last year data fetch failed: ${res.status}`))
+      .then(res => res.data || []);
+
+    const secondRoundPromise = fetch("http://localhost:8000/crawl/2nd") // 수시 2차
+      .then(res => res.ok ? res.json() : Promise.reject(`2nd round data fetch failed: ${res.status}`))
+      .then(res => res.data || []);
+      
+    // 수시 2차 전년도 데이터 fetch 추가
+    const secondRoundLastYearPromise = fetch("http://localhost:8000/crawl/2nd/lastyear")
+      .then(res => res.ok ? res.json() : Promise.reject(`2nd round last year data fetch failed: ${res.status}`))
+      .then(res => res.data || []);
+
+    Promise.all([currentYearPromise, lastYearPromise, secondRoundPromise, secondRoundLastYearPromise])
+      .then(([currentData, lyData, sData, sLyData]) => {
+        setData(currentData);
+        setLastYearData(lyData);
+        setData2nd(sData);
+        setLastYearData2nd(sLyData); // 수시 2차 전년도 state 업데이트
+      })
+      .catch((err) => {
+        console.error("데이터 불러오기 실패:", err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
+  // '전년도 비교' 탭을 위한 데이터 (수시 1차 기준)
+  const comparisonData1st = useMemo(() => 
+    createComparisonData(data, lastYearData), 
+  [data, lastYearData]);
+  
+  // '전년도 비교' 탭을 위한 데이터 (수시 2차 기준)
+  const comparisonData2nd = useMemo(() => 
+    createComparisonData(data2nd, lastYearData2nd), 
+  [data2nd, lastYearData2nd]);
+
   
   // 현재 탭과 필터에 따라 최종적으로 표시될 데이터
   const processedData = useMemo(() => {
-    const sourceData = activeTab === 'current' ? data : comparisonData;
+    let sourceData;
+    
+    if (activeTab === '1st') {
+        sourceData = (subTab === 'current') ? data : comparisonData1st;
+    } else { // activeTab === '2nd'
+        sourceData = (subTab === 'current') ? data2nd : comparisonData2nd;
+    }
     
     let filtered = Array.isArray(sourceData) ? [...sourceData] : [];
   
@@ -534,17 +563,20 @@ export default function App() {
     }
   
     if (sortOrder !== 'none') {
-        // '지원자수'는 특별전형의 합계를 이미 포함하고 있음
         const getApplicants = (item) => (item.지원자수 || 0);
         filtered.sort((a, b) => sortOrder === 'desc' ? getApplicants(b) - getApplicants(a) : getApplicants(a) - getApplicants(b));
     }
   
     return filtered;
-  }, [data, comparisonData, searchTerm, categoryFilter, sortOrder, activeTab]);
+  }, [data, data2nd, comparisonData1st, comparisonData2nd, searchTerm, categoryFilter, sortOrder, activeTab, subTab]);
+
+  // 렌더링 상태 정의
+  const isRealtimeTab = subTab === 'current';
+  const isCompareTab = subTab === 'compare';
 
   // '실시간' 탭의 테이블용 데이터 (필터링됨)
-  const generalData = processedData.filter(item => activeTab === 'current' && item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
-  const specialData = processedData.filter(item => activeTab === 'current' && item.전형명 === "특별전형");
+  const generalData = processedData.filter(item => isRealtimeTab && item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
+  const specialData = processedData.filter(item => isRealtimeTab && item.전형명 === "특별전형");
   
   const groupedGeneral = generalData.reduce((acc, cur) => {
     const category = cur.전형명 || '일반 전형';
@@ -553,24 +585,27 @@ export default function App() {
     return acc
   }, {})
 
-  // --- 통계 카드용 데이터 계산 (필터링 *무시* - 항상 전체 기준) ---
-  const totalApplicants = useMemo(() => data.reduce((sum, item) => sum + (item.지원자수 || 0), 0), [data]);
-  const originalGeneralData = useMemo(() => data.filter(item => item.전형명 !== "특별전형"), [data]);
+  // --- 통계 카드용 데이터 계산 (실시간 탭 기준) ---
+  const currentStatsData = useMemo(() => (
+    activeTab === '1st' ? data : data2nd
+  ), [activeTab, data, data2nd]);
+
+  const totalApplicants = useMemo(() => currentStatsData.reduce((sum, item) => sum + (item.지원자수 || 0), 0), [currentStatsData]);
+  const originalGeneralData = useMemo(() => currentStatsData.filter(item => item.전형명 !== "특별전형"), [currentStatsData]);
   const totalGeneralApplicants = useMemo(() => originalGeneralData.reduce((sum, item) => sum + (item.지원자수 || 0), 0), [originalGeneralData]);
   const totalGeneralCapacity = useMemo(() => originalGeneralData.reduce((sum, item) => sum + (item.모집인원 || 0), 0), [originalGeneralData]);
-  
   const avgCompetitionRate = useMemo(() => (totalGeneralCapacity > 0 ? totalGeneralApplicants / totalGeneralCapacity : 0), [totalGeneralApplicants, totalGeneralCapacity]);
   
   const highestCompetitionRateItem = useMemo(() => {
-    const general = data.filter(item => item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
+    const general = currentStatsData.filter(item => item.전형명 !== "특별전형" && typeof item.경쟁률 === 'number');
     return general.length > 0 
       ? general.reduce((max, item) => (item.경쟁률 > max.경쟁률 ? item : max), {경쟁률: 0, 학과: 'N/A', 전형명: ''}) 
       : { 경쟁률: 0, 학과: 'N/A', 전형명: '' };
-  }, [data]);
+  }, [currentStatsData]);
 
-  // --- 차트용 데이터 계산 (필터링 *적용*) ---
+  // --- 차트용 데이터 계산 (실시간 탭 + 필터링 적용) ---
   const topDepartments = useMemo(() => {
-    const source = activeTab === 'current' ? processedData : processedData.map(item => ({...item, 경쟁률: item.경쟁률 || 0}));
+    const source = processedData; // processedData는 이미 탭(1차/2차/비교)과 필터를 모두 반영
     
     let filteredSource = source.filter(item => item.전형명 !== '특별전형' && typeof item.경쟁률 === 'number');
     
@@ -578,15 +613,14 @@ export default function App() {
         .sort((a,b) => b.경쟁률 - a.경쟁률)
         .slice(0,10)
         .map(item => ({...item, displayName: `${item.학과} (${item.전형명})`}));
-  }, [processedData, activeTab]);
+  }, [processedData]);
 
 
   const categoryDistribution = useMemo(() => {
-    const source = processedData; // 항상 현재 필터링된 데이터를 기준
+    const source = processedData; // processedData는 이미 탭과 필터를 모두 반영
     
     const applicantsByCategory = source.reduce((acc, cur) => {
       const category = cur.계열 || '기타';
-      // '지원자수'는 이미 특별전형 합계가 포함되어 있음
       const applicants = (cur.지원자수 || 0); 
       if (!acc[category]) {
         acc[category] = 0;
@@ -603,31 +637,27 @@ export default function App() {
 
   const categories = ['전체', '공학', '예체능', '인문사회'];
 
+  // 페이지 제목 동적 설정
+  const pageTitle = useMemo(() => {
+    const round = activeTab === '1st' ? '수시 1차' : '수시 2차';
+    const type = subTab === 'current' ? '실시간 경쟁률' : '전년도 비교';
+    return `${round} ${type}`;
+  }, [activeTab, subTab]);
 
   // 로딩 스켈레톤
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
         <div className="mx-auto max-w-7xl space-y-8">
-          <div className="space-y-4">
             <Skeleton className="h-10 w-80" />
             <Skeleton className="h-6 w-96" />
-          </div>
           <div className="grid gap-6 md:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
-                <CardHeader className="pb-2">
-                  <Skeleton className="h-4 w-20" />
-                </CardHeader>
-                <CardContent>
-                  <Skeleton className="h-8 w-16" />
-                </CardContent>
-              </Card>
+              <Card key={i}><CardHeader className="pb-2"><Skeleton className="h-4 w-20" /></CardHeader><CardContent><Skeleton className="h-8 w-16" /></CardContent></Card>
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <Skeleton className="h-96 w-full" />
-            <Skeleton className="h-96 w-full" />
+            <Skeleton className="h-96 w-full" /><Skeleton className="h-96 w-full" />
           </div>
           <Skeleton className="h-96 w-full" />
         </div>
@@ -646,7 +676,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-3xl font-extrabold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                {searchTerm ? `${searchTerm} 경쟁률 현황` : '인하공업전문대학 수시 1차 경쟁률'}
+                {searchTerm ? `${searchTerm} 경쟁률 현황` : `인하공업전문대학 ${pageTitle}`}
               </h1>
               <p className="text-slate-600 mt-1">
                 실시간 입학 경쟁률 및 지원 현황을 확인하세요
@@ -655,15 +685,43 @@ export default function App() {
           </div>
         </div>
         
-        {/* 탭 */}
+        {/* 메인 탭 */}
         <div className="flex justify-center border-b border-slate-200">
-            <button onClick={() => setActiveTab('current')} className={cn("px-6 py-3 font-semibold text-sm transition-colors", activeTab === 'current' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-blue-600')}>실시간 경쟁률</button>
-            <button onClick={() => setActiveTab('lastYear')} className={cn("px-6 py-3 font-semibold text-sm transition-colors", activeTab === 'lastYear' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-blue-600')}>전년도 비교</button>
+            <button 
+                onClick={() => { setActiveTab('1st'); setSubTab('current'); }} 
+                className={cn("px-6 py-3 font-semibold text-lg transition-colors", activeTab === '1st' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-blue-600')}
+            >
+                수시 1차
+            </button>
+            <button 
+                onClick={() => { setActiveTab('2nd'); setSubTab('current'); }} 
+                className={cn("px-6 py-3 font-semibold text-lg transition-colors", activeTab === '2nd' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-blue-600')}
+            >
+                수시 2차
+            </button>
         </div>
 
+        {/* 서브 탭 (항상 표시) */}
+        <div className="flex justify-center gap-4 mt-4">
+            <button 
+                onClick={() => setSubTab('current')} 
+                className={cn("px-5 py-2 font-semibold text-sm rounded-full transition-colors", 
+                              subTab === 'current' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-100')}
+            >
+                실시간 (26년)
+            </button>
+            <button 
+                onClick={() => setSubTab('compare')} 
+                className={cn("px-5 py-2 font-semibold text-sm rounded-full transition-colors", 
+                              subTab === 'compare' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-100')}
+            >
+                전년도 비교
+            </button>
+        </div>
+        
 
         {/* 검색 및 필터링 */}
-        <div className="space-y-4">
+        <div className="space-y-4 pt-4">
             <div className="relative">
                 <input
                     type="text"
@@ -691,7 +749,8 @@ export default function App() {
              </div>
         </div>
 
-        {activeTab === 'current' && (
+        {/* --- 실시간 뷰 (subTab === 'current') --- */}
+        {isRealtimeTab && (
             <>
                 {/* 통계 카드 */}
                 <div className="grid gap-6 md:grid-cols-4">
@@ -700,46 +759,29 @@ export default function App() {
                       <CardTitle className="text-sm font-medium text-blue-700">총 지원자수 (전체)</CardTitle>
                       <Users className="h-4 w-4 text-blue-600" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-extrabold text-blue-800 text-center">
-                        {totalApplicants.toLocaleString()}명
-                      </div>
-                    </CardContent>
+                    <CardContent><div className="text-3xl font-extrabold text-blue-800 text-center">{totalApplicants.toLocaleString()}명</div></CardContent>
                   </Card>
-
                   <Card className="border-0 shadow-lg transition-all hover:shadow-xl bg-gradient-to-br from-green-50 to-green-100">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                       <CardTitle className="text-sm font-medium text-green-700">총 모집인원 (전체)</CardTitle>
                       <Target className="h-4 w-4 text-green-600" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-extrabold text-green-800 text-center">
-                        {totalGeneralCapacity.toLocaleString()}명
-                      </div>
-                    </CardContent>
+                    <CardContent><div className="text-3xl font-extrabold text-green-800 text-center">{totalGeneralCapacity.toLocaleString()}명</div></CardContent>
                   </Card>
-
                   <Card className="border-0 shadow-lg transition-all hover:shadow-xl bg-gradient-to-br from-orange-50 to-orange-100">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                       <CardTitle className="text-sm font-medium text-orange-700">평균 경쟁률 (전체)</CardTitle>
                       <BarChart3 className="h-4 w-4 text-orange-600" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-extrabold text-orange-800 text-center">
-                        {avgCompetitionRate.toFixed(2)}:1
-                      </div>
-                    </CardContent>
+                    <CardContent><div className="text-3xl font-extrabold text-orange-800 text-center">{avgCompetitionRate.toFixed(2)}:1</div></CardContent>
                   </Card>
-
                   <Card className="border-0 shadow-lg transition-all hover:shadow-xl bg-gradient-to-br from-red-50 to-red-100">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                       <CardTitle className="text-sm font-medium text-red-700">최고 경쟁률 (학과)</CardTitle>
                       <TrendingUp className="h-4 w-4 text-red-600" />
                     </CardHeader>
                     <CardContent className="text-center">
-                      <div className="text-3xl font-bold text-red-800" title={highestCompetitionRateItem.학과}>
-                        {highestCompetitionRateItem.경쟁률.toFixed(1)}:1
-                      </div>
+                      <div className="text-3xl font-bold text-red-800" title={highestCompetitionRateItem.학과}>{highestCompetitionRateItem.경쟁률.toFixed(1)}:1</div>
                       <p className="text-sm text-red-600 mt-1 font-semibold truncate">{highestCompetitionRateItem.학과} ({highestCompetitionRateItem.전형명})</p>
                     </CardContent>
                   </Card>
@@ -748,88 +790,46 @@ export default function App() {
                  {/* 차트 섹션 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <Card className="border-0 shadow-lg">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-3 text-xl text-slate-800">
-                                <BarChart3 className="w-5 h-5 text-blue-600" />
-                                <span>{searchTerm ? `${searchTerm} 경쟁률` : "경쟁률 TOP 10 학과"}</span>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <CompetitionBarChart data={topDepartments} />
-                        </CardContent>
+                        <CardHeader><CardTitle className="flex items-center gap-3 text-xl text-slate-800"><BarChart3 className="w-5 h-5 text-blue-600" /><span>{searchTerm ? `${searchTerm} 경쟁률` : "경쟁률 TOP 10 학과"}</span></CardTitle></CardHeader>
+                        <CardContent><CompetitionBarChart data={topDepartments} /></CardContent>
                     </Card>
                     <Card className="border-0 shadow-lg">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-3 text-xl text-slate-800">
-                                <PieChartIcon className="w-5 h-5 text-blue-600" />
-                                <span>계열별 지원자 분포</span>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <CategoryPieChart data={categoryDistribution} />
-                        </CardContent>
+                        <CardHeader><CardTitle className="flex items-center gap-3 text-xl text-slate-800"><PieChartIcon className="w-5 h-5 text-blue-600" /><span>계열별 지원자 분포</span></CardTitle></CardHeader>
+                        <CardContent><CategoryPieChart data={categoryDistribution} /></CardContent>
                     </Card>
                 </div>
+
+                 {/* 정렬 버튼 */}
                  <div className="flex flex-wrap items-center gap-2 justify-end mt-8">
                      <span className="text-sm font-semibold text-slate-600 mr-2">정렬:</span>
-                     <button 
-                        onClick={() => setSortOrder('desc')}
-                        className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'desc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}>
-                        <ArrowDownAZ className="w-4 h-4" /> 지원자수 높은 순
-                    </button>
-                    <button 
-                        onClick={() => setSortOrder('asc')}
-                        className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'asc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}>
-                       <ArrowUpAZ className="w-4 h-4" /> 지원자수 낮은 순
-                    </button>
-                     <button 
-                        onClick={() => { setSortOrder('none');}}
-                        className="flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors bg-white text-slate-700 hover:bg-slate-100">
-                       <FilterX className="w-4 h-4" /> 초기화
-                    </button>
+                     <button onClick={() => setSortOrder('desc')} className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'desc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}><ArrowDownAZ className="w-4 h-4" /> 지원자수 높은 순</button>
+                     <button onClick={() => setSortOrder('asc')} className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'asc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}><ArrowUpAZ className="w-4 h-4" /> 지원자수 낮은 순</button>
+                     <button onClick={() => { setSortOrder('none');}} className="flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors bg-white text-slate-700 hover:bg-slate-100"><FilterX className="w-4 h-4" /> 초기화</button>
                 </div>
 
                 {/* 일반 전형별 테이블 */}
                 {Object.keys(groupedGeneral).map((전형명) => (
-                  <EnrollmentTable 
-                    key={전형명} 
-                    전형명={전형명} 
-                    data={groupedGeneral[전형명]} 
-                    isSpecial={false}
-                  />
+                  <EnrollmentTable key={전형명} 전형명={전형명} data={groupedGeneral[전형명]} isSpecial={false} />
                 ))}
 
-                {/* 특별전형 섹션 (맨 아래 배치) */}
+                {/* 특별전형 섹션 */}
                 {specialData.length > 0 && (
-                  <EnrollmentTable
-                    전형명="지원인원 현황 (전문대졸, 북한이탈주민)"
-                    data={specialData}
-                    isSpecial={true}
-                  />
+                  <EnrollmentTable 전형명="지원인원 현황 (전문대졸, 북한이탈주민)" data={specialData} isSpecial={true} />
                 )}
             </>
         )}
         
-        {activeTab === 'lastYear' && (
+        {/* --- 전년도 비교 뷰 (subTab === 'compare') --- */}
+        {isCompareTab && (
              <>
+                {/* 정렬 버튼 */}
                 <div className="flex flex-wrap items-center gap-2 justify-end mt-8">
                      <span className="text-sm font-semibold text-slate-600 mr-2">정렬:</span>
-                     <button 
-                        onClick={() => setSortOrder('desc')}
-                        className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'desc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}>
-                        <ArrowDownAZ className="w-4 h-4" /> 지원자수 높은 순
-                    </button>
-                    <button 
-                        onClick={() => setSortOrder('asc')}
-                        className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'asc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}>
-                       <ArrowUpAZ className="w-4 h-4" /> 지원자수 낮은 순
-                    </button>
-                     <button 
-                        onClick={() => { setSortOrder('none');}}
-                        className="flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors bg-white text-slate-700 hover:bg-slate-100">
-                       <FilterX className="w-4 h-4" /> 초기화
-                    </button>
+                     <button onClick={() => setSortOrder('desc')} className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'desc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}><ArrowDownAZ className="w-4 h-4" /> 지원자수 높은 순</button>
+                     <button onClick={() => setSortOrder('asc')} className={cn("flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors", sortOrder === 'asc' ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-100')}><ArrowUpAZ className="w-4 h-4" /> 지원자수 낮은 순</button>
+                     <button onClick={() => { setSortOrder('none');}} className="flex items-center gap-1 px-3 py-1 text-sm font-medium rounded-full transition-colors bg-white text-slate-700 hover:bg-slate-100"><FilterX className="w-4 h-4" /> 초기화</button>
                 </div>
+                {/* 비교 테이블 (processedData는 1차/2차 비교 데이터를 모두 올바르게 선택함) */}
                 <ComparisonTable data={processedData} />
             </>
         )}
