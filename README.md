@@ -3,7 +3,7 @@
 
 1. 기간 : 26년도 수시 1-2차 기간 25/09~25/12
 
-2. 주요 개발 툴 : VScode, React. Python
+2. 주요 개발 툴 : VScode, React, Python
 
 3. 크롤링 사이트
 
